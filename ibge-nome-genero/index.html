@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Analisador de Gênero — IBGE</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="app">
+
+  <header class="header">
+    <div>
+      <h1>Analisador de Gênero</h1>
+      <p class="header-sub">API do IBGE · Processamento otimizado com cache persistente</p>
+    </div>
+    <div class="cache-status" id="cacheStatus" onclick="verCache()">
+      <span class="cache-dot"></span>
+      <span id="cacheTxt">Cache: 0 nomes</span>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <div class="tabs">
+      <button class="tab active" onclick="trocarAba('individual', this)">Nome individual</button>
+      <button class="tab" onclick="trocarAba('lote', this)">Importar CSV</button>
+    </div>
+
+    <!-- ===== ABA INDIVIDUAL ===== -->
+    <div id="abaIndividual" class="aba">
+      <div class="search-box">
+        <input type="text" id="nomeInput" placeholder="Ex: João, Maria, Ariel..." autocomplete="off" />
+        <button onclick="analisar()">Analisar</button>
+      </div>
+      <div class="chips">
+        <span class="chip-label">Exemplos:</span>
+        <button class="chip" onclick="analisarExemplo('João')">João</button>
+        <button class="chip" onclick="analisarExemplo('Maria')">Maria</button>
+        <button class="chip" onclick="analisarExemplo('Ariel')">Ariel</button>
+        <button class="chip" onclick="analisarExemplo('Gabriel')">Gabriel</button>
+        <button class="chip" onclick="analisarExemplo('Luan')">Luan</button>
+      </div>
+      <div id="loadingInd" class="loading hidden"><span class="spinner"></span> Consultando...</div>
+      <div id="erroInd" class="msg-erro hidden"></div>
+      <div id="resultadoInd" class="hidden">
+        <div id="cardInd" class="card-resultado">
+          <div class="card-topo">
+            <div id="iconInd" class="icone-genero"></div>
+            <div>
+              <span class="rotulo">Nome analisado</span>
+              <h2 id="nomeExibido"></h2>
+            </div>
+            <div id="badgeInd" class="badge"></div>
+          </div>
+          <div class="metricas">
+            <div class="metrica"><span class="metrica-label">Confiança</span><span id="confianca" class="metrica-valor"></span></div>
+            <div class="metrica"><span class="metrica-label">♂ Masculino</span><span id="freqMasc" class="metrica-valor"></span></div>
+            <div class="metrica"><span class="metrica-label">♀ Feminino</span><span id="freqFem" class="metrica-valor"></span></div>
+          </div>
+          <div class="barra-wrap">
+            <div class="barra-labels"><span>♂ Masculino</span><span>Feminino ♀</span></div>
+            <div class="barra-track">
+              <div id="barraMasc" class="barra barra-m"></div>
+              <div id="barraFem" class="barra barra-f"></div>
+            </div>
+            <div class="barra-pct"><span id="pctMasc"></span><span id="pctFem"></span></div>
+          </div>
+          <div id="cacheHit" class="cache-hit hidden">⚡ Resultado do cache local — sem requisição à API</div>
+        </div>
+        <p class="nota">ℹ️ Dados baseados no Censo IBGE.</p>
+      </div>
+    </div>
+
+    <!-- ===== ABA LOTE ===== -->
+    <div id="abaLote" class="aba hidden">
+
+      <div id="zonaUpload" class="zona-upload"
+           ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event)">
+        <input type="file" id="fileInput" accept=".csv,.txt" onchange="carregarArquivo(event)" style="display:none" />
+        <div class="upload-emoji">📂</div>
+        <p class="upload-titulo">Arraste seu arquivo CSV aqui</p>
+        <p class="upload-desc">ou clique para selecionar · .csv ou .txt · uma coluna com os nomes</p>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+          <button class="btn-primario" onclick="document.getElementById('fileInput').click()">Selecionar arquivo</button>
+          <button class="btn-secundario" onclick="baixarExemplo()">⬇ Baixar CSV de exemplo</button>
+        </div>
+      </div>
+
+      <div id="previewArea" class="hidden">
+
+        <!-- Painel de economia (cache + deduplicação) -->
+        <div id="painelEconomia" class="painel-economia hidden"></div>
+
+        <!-- Configurações -->
+        <div class="config-lote">
+          <div class="config-titulo">⚙️ Configurações de processamento</div>
+          <div class="config-grid">
+            <div class="config-item">
+              <label>Concorrência (simultâneas)</label>
+              <input type="number" id="cfgConcorrencia" value="10" min="1" max="20" />
+              <span class="config-hint">Requisições em paralelo · recomendado: 10–15</span>
+            </div>
+            <div class="config-item">
+              <label>Intervalo entre lotes (ms)</label>
+              <input type="number" id="cfgIntervalo" value="100" min="0" max="5000" step="50" />
+              <span class="config-hint">0ms apenas para listas pequenas (&lt;100 únicos)</span>
+            </div>
+            <div class="config-item">
+              <label>Tentativas por erro</label>
+              <input type="number" id="cfgRetry" value="3" min="1" max="5" />
+              <span class="config-hint">Retry com backoff exponencial automático</span>
+            </div>
+          </div>
+          <div id="avisoConfig" class="aviso-config"></div>
+          <div class="config-tip">
+            💡 <strong>Dica rápida:</strong> Para listas grandes (5k–30k únicos), use concorrência 10–15 e intervalo 100ms.
+            Se receber muitos erros, aumente o intervalo para 200–300ms.
+          </div>
+        </div>
+
+        <div class="preview-header">
+          <div>
+            <strong id="nomeArquivo" class="preview-arquivo"></strong>
+            <span id="countNomes" class="preview-count"></span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn-secundario" onclick="resetarLote()">✕ Remover</button>
+            <button class="btn-primario" onclick="processarLote()">▶ Processar</button>
+          </div>
+        </div>
+        <div id="previewLista" class="preview-lista"></div>
+      </div>
+
+      <!-- Progresso -->
+      <div id="progressoArea" class="hidden">
+        <div class="fase-badge" id="faseBadge">Iniciando...</div>
+
+        <div class="progresso-bloco">
+          <div class="progresso-header">
+            <span id="progressoTexto">Aguarde...</span>
+            <span id="progressoPct" class="progresso-pct">0%</span>
+          </div>
+          <div class="progresso-track">
+            <div id="progressoBar" class="progresso-bar"></div>
+          </div>
+        </div>
+
+        <!-- Velocidade e ETA -->
+        <div class="progresso-eta" id="progressoEta"></div>
+        <div class="progresso-detalhe" id="progressoDetalhe"></div>
+
+        <div class="progresso-stats">
+          <span class="pstat pstat-c">⚡ <strong id="cntCache">0</strong> cache</span>
+          <span class="pstat pstat-m">♂ <strong id="cntMasc">0</strong></span>
+          <span class="pstat pstat-f">♀ <strong id="cntFem">0</strong></span>
+          <span class="pstat pstat-i">⚥ <strong id="cntIndef">0</strong></span>
+          <span class="pstat pstat-n">✗ <strong id="cntNao">0</strong></span>
+        </div>
+
+        <!-- Taxa adaptativa -->
+        <div id="taxaAdaptativa" class="taxa-adaptativa hidden"></div>
+
+        <div style="text-align:center;margin-top:1rem;">
+          <button class="btn-secundario" onclick="cancelarProcessamento()">⏹ Cancelar</button>
+        </div>
+      </div>
+
+      <!-- Resultados -->
+      <div id="resultadosLote" class="hidden">
+        <div class="resumo-cards">
+          <div class="resumo-card resumo-m"><span class="resumo-num" id="resumoMasc">0</span><span class="resumo-label">Masculino</span></div>
+          <div class="resumo-card resumo-f"><span class="resumo-num" id="resumoFem">0</span><span class="resumo-label">Feminino</span></div>
+          <div class="resumo-card resumo-i"><span class="resumo-num" id="resumoIndef">0</span><span class="resumo-label">Indefinido</span></div>
+          <div class="resumo-card resumo-n"><span class="resumo-num" id="resumoNao">0</span><span class="resumo-label">Não encontrado</span></div>
+        </div>
+        <div class="resumo-economia" id="resumoEconomia"></div>
+
+        <div class="resultados-toolbar">
+          <div class="filtros">
+            <button class="filtro active" onclick="filtrar('todos', this)">Todos</button>
+            <button class="filtro" onclick="filtrar('M', this)">♂ Masc.</button>
+            <button class="filtro" onclick="filtrar('F', this)">♀ Fem.</button>
+            <button class="filtro" onclick="filtrar('I', this)">⚥ Indef.</button>
+            <button class="filtro" onclick="filtrar('N', this)">✗ Não enc.</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn-secundario" onclick="limparCache()">🗑 Limpar cache</button>
+            <button class="btn-secundario" onclick="resetarLote()">Nova importação</button>
+            <button class="btn-primario" onclick="exportarCSV()">⬇ Exportar CSV</button>
+          </div>
+        </div>
+
+        <div class="busca-wrap">
+          <input type="text" id="buscaTabela" placeholder="🔍 Buscar nome..." oninput="paginaAtual=1;renderizarTabela()" style="width:100%" />
+        </div>
+
+        <div class="tabela-wrap">
+          <table class="tabela">
+            <thead>
+              <tr>
+                <th class="th-num">#</th>
+                <th class="col-sort" onclick="ordenarPor('nome')">Nome <span class="sort-icon">↕</span></th>
+                <th class="col-sort" onclick="ordenarPor('genero')">Gênero <span class="sort-icon">↕</span></th>
+                <th class="col-sort" onclick="ordenarPor('confianca')">Confiança <span class="sort-icon">↕</span></th>
+                <th>♂ Freq.</th>
+                <th>♀ Freq.</th>
+                <th class="th-src">Fonte</th>
+              </tr>
+            </thead>
+            <tbody id="tabelaBody"></tbody>
+          </table>
+        </div>
+
+        <div class="paginacao" id="paginacao"></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="script.js"></script>
+</body>
+</html>
